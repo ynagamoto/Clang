@@ -14,7 +14,7 @@ pthread_mutex_t mp; // mutex の宣言
 int main() {
 	pthread_t tid1, tid2;
 
-	pthread_mutex_init(&mp, &counter); // mutex の初期化
+	pthread_mutex_init(&mp, NULL); // mutex の初期化
 
 	pthread_create(&tid1, NULL, func1, NULL);
 	pthread_create(&tid2, NULL, func2, NULL);
