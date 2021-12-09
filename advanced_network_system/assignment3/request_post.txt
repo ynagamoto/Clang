@@ -1,0 +1,20 @@
+POST /post.html HTTP/1.1
+Host: localhost:8080
+User-Agent: Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:94.0) Gecko/20100101 Firefox/94.0
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8
+Accept-Language: ja,en-US;q=0.7,en;q=0.3
+Accept-Encoding: gzip, deflate
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 8
+Origin: http://localhost:8080
+Connection: keep-alive
+Referer: http://localhost:8080/post.html
+Cookie: csrftoken=hLCh1xKzVIuK9b16lksK5Uwg0QaLcj566TGdu14VJDQbttKKL0G9AfFflb0iQ01T; argocd.token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE2MzU5MzQyMDQsImp0aSI6ImE5MjYxMjZhLWNjZjctNGVhOC05MzdmLTczZjUxMDgyYTYwNSIsImlhdCI6MTYzNTg0NzgwNCwiaXNzIjoiYXJnb2NkIiwibmJmIjoxNjM1ODQ3ODA0LCJzdWIiOiJhZG1pbjpsb2dpbiJ9.4lwUNwvbyLidGXdEa13KoGRvioHHJDJdm22pCxlPEz4
+Upgrade-Insecure-Requests: 1
+Sec-Fetch-Dest: document
+Sec-Fetch-Mode: navigate
+Sec-Fetch-Site: same-origin
+Sec-Fetch-User: ?1
+
+name=aaa
+age=2300
