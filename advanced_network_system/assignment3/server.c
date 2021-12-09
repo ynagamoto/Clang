@@ -7,13 +7,23 @@
 #include<sys/select.h>
 #include<sys/stat.h>
 
-#define MAXCONN  10
-#define METHSIZE 256
-#define SIZE     (5*1024)
+#define KILO      1024
+#define MAXCONN   10
+#define SIZE      (2*KILO)
 
 enum {
   NQUEUESIZE = MAXCONN,
   MAXNCLIENTS = MAXCONN, // 接続可能なクライアントの上限
+};
+
+struct header {
+  char key[KILO];
+  char value[KILO];
+};
+
+struct query {
+  char key[KILO];
+  char value[KILO];
 };
 
 char static_path[]    = "./static";
@@ -109,10 +119,13 @@ int main(int argc, char *argv[]) {
 }
 
 void httpServer(int clientfd) {
-  int  status, req_size, res_size, file_size;
-  char req_mes[SIZE], res_mes[SIZE*2], method[METHSIZE], target[METHSIZE], *fline;
+  int  status, req_size, res_size, file_size, flag = 1;
+  char req_mes[SIZE], res_mes[SIZE*2], req_lines[KILO][2*KILO], first_line[KILO], method[KILO/4], target[KILO/4], *temp_target, *line;
   char file_path[SIZE], file_str[SIZE/2], header_field[SIZE];
   FILE *res_filefp;
+  int  req_line_num = 0, query_num = 0; 
+  struct header headers[KILO];
+  struct query  querys[KILO];
 
   if (read(clientfd, req_mes, sizeof(req_mes)) < 0) {
     perror("read");
@@ -122,23 +135,71 @@ void httpServer(int clientfd) {
   printf("%s\n", req_mes);
 
   // check method and target
-  fline  = strtok(req_mes, "\n");
-  strcpy(method, strtok(fline, " "));
+  line = strtok(req_mes, "\n");
+  strcpy(first_line, line);
+
+  // split request to line
+  for (req_line_num = 0, line = strtok(NULL, "\n"); line != NULL; line = strtok(NULL, "\n")) {
+    strcpy(req_lines[req_line_num], line);
+    req_line_num++;
+  }
+
+  // split method
+  strcpy(method, strtok(first_line, " "));
   if (method == NULL) {
-    perror("method");
-    close(clientfd);
-    exit(1);
+    // perror("method");
+    // close(clientfd);
+    // exit(1);
+    flag = 0;
   }
+  // printf("method -> %s\n", method);
 
-  strcpy(target, strtok(NULL, " "));
+  // split target and analyze get query
+  temp_target = strtok(NULL, " ");
+  if (strchr(temp_target, (int)'?') != NULL) {
+    strcpy(target, strtok(temp_target, "?"));
+    // split text with & -> store get query
+    char rem[KILO];
+    char temp_query[KILO][KILO];
+    strcpy(rem, strtok(NULL, "\0"));
+    for (char *temp = strtok(rem, "&"); temp!= NULL; temp = strtok(NULL, "&")) {
+      strcpy(temp_query[query_num], temp);
+      query_num++;
+    }
+
+    for (int i = 0; i < query_num; i++) {
+      char *temp = strtok(temp_query[i], "=");
+      strcpy(querys[i].key, temp); 
+      strcpy(querys[i].value, strtok(NULL, "\0")); 
+    }
+  } else {
+    strcpy(target, temp_target); 
+  }
   if (target == NULL) {
-    perror("target");
-    close(clientfd);
-    exit(1);
+    // perror("target");
+    // close(clientfd);
+    // exit(1);
+    flag = 0;
+  }
+  // printf("target -> %s\n", target);
+
+  // analyze post query
+  for (int i = 0; i < req_line_num; i++) {
+    char *key;
+    if (strchr(req_lines[i], (int)':') != NULL) {
+      // printf("line -> %s\n", line);
+      key = strtok(req_lines[i], ":");
+      strcpy(headers[i].key, key);
+      strcpy(headers[i].value, strtok(NULL, "\0"));
+    } else if (strchr(req_lines[i], (int)'=') != NULL) { // analyze post query
+      key = strtok(req_lines[i], "=");
+      strcpy(querys[query_num].key, key);
+      strcpy(querys[query_num].value, strtok(NULL, "\0"));
+      query_num++;
+    }
   }
 
-
-  if (strcmp(method, "GET") == 0) {
+  if (flag && (strcmp(method, "GET") == 0 || strcmp(method, "POST") == 0)) {
     if (strcmp(target, "/") == 0) {
       strcpy(target, "/index.html");
     }
@@ -147,26 +208,25 @@ void httpServer(int clientfd) {
     printf("file_path: %s\n", file_path);
     struct stat sb;
     if (stat(file_path, &sb) == -1) {
-      perror("stat");
-      close(clientfd);
-      exit(1);
-    }
-    if ((file_size = sb.st_size) > 0) {
-      if ((res_filefp = fopen(file_path, "r")) == NULL) {
-        perror("fopen");
-        close(clientfd);
-        exit(1);
-      }
-      if (fread(file_str, sizeof(unsigned char), sizeof(file_str)/sizeof(unsigned char), res_filefp) < 0) {
-        perror("fread");
-        close(clientfd);
-        fclose(res_filefp);
-        exit(1);
-      }
-      fclose(res_filefp);
-      status = 200;
-    } else {
       status = 404;
+    } else {
+      if ((file_size = sb.st_size) > 0) {
+        if ((res_filefp = fopen(file_path, "r")) == NULL) {
+          perror("fopen");
+          close(clientfd);
+          exit(1);
+        }
+        if (fread(file_str, sizeof(unsigned char), sizeof(file_str)/sizeof(unsigned char), res_filefp) < 0) {
+          perror("fread");
+          close(clientfd);
+          fclose(res_filefp);
+          exit(1);
+        }
+        fclose(res_filefp);
+        status = 200;
+      } else {
+        status = 404;
+      }
     }
   } else {
     status = 404;
@@ -187,7 +247,7 @@ void httpServer(int clientfd) {
   res_size = strlen(res_mes);
 
   // send response
-  // printf("%s\n", res_mes);
+  printf("%s\n", res_mes);
   if (write(clientfd, res_mes, sizeof(res_mes)) < 0) {
     perror("write");
     close(clientfd);
