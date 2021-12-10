@@ -2,7 +2,7 @@
 
 mkdir -p bin
 
-dir=source
+dir=documentroot
 i=0
 
 for file in $dir/*.c; do

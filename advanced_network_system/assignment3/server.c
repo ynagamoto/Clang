@@ -27,7 +27,7 @@ struct query {
   char value[KILO];
 };
 
-char static_path[]    = "./static";
+char static_path[]    = "./documentroot";
 char header_content[] = "Content-Length: ";
 
 void httpServer(int clientfd);
@@ -120,8 +120,11 @@ int main(int argc, char *argv[]) {
       } 
 
       count_access++;
-      httpServer(clientfd);
-      
+      if ((pid = fork()) == 0) {
+        httpServer(clientfd);
+        close(clientfd);
+        exit(0);
+      } 
       close(clientfd);
     }
   }
@@ -221,73 +224,95 @@ void httpServer(int clientfd) {
       strcpy(target, "/index.html");
     }
     
-    if (strstr(target, ".html") != NULL) {
-      snprintf(file_path, sizeof(file_path), "%s%s", static_path, target);
-      // printf("file_path: %s\n", file_path);
-      struct stat sb;
-      if (stat(file_path, &sb) == -1) {
-        status = 404;
-      } else {
+    struct stat sb;
+    snprintf(file_path, sizeof(file_path), "%s%s", static_path, target);
+    if (stat(file_path, &sb) == -1) { // 指定されたファイルが存在しなかった
+      status = 404;
+    } else {
+      if (strstr(target, ".html") != NULL) {
+        printf("html\n");
+        snprintf(file_path, sizeof(file_path), "%s%s", static_path, target);
+        // printf("file_path: %s\n", file_path);
         if ((file_size = sb.st_size) > 0) {
-          if ((res_filefp = fopen(file_path, "r")) == NULL) {
-            perror("fopen");
-            close(clientfd);
-            exit(1);
-          }
-          if (fread(file_str, sizeof(unsigned char), sizeof(file_str)/sizeof(unsigned char), res_filefp) < 0) {
-            perror("fread");
-            close(clientfd);
+          if ((res_filefp = fopen(file_path, "r")) != NULL) {
+            if (fread(file_str, sizeof(unsigned char), sizeof(file_str)/sizeof(unsigned char), res_filefp) < 0) {
+              perror("fread");
+              // close(clientfd);
+              status = 500;
+            } else {
+              status = 200;
+            }
             fclose(res_filefp);
-            exit(1);
+          } else { // 存在するが開けない
+            status = 500;
           }
-          fclose(res_filefp);
-          status = 200;
         } else {
           status = 404;
         }
-      }
-    } else if (strstr(target, ".c") != NULL){
-      int execpid;
-      int ctop[2];
-      pipe(ctop);
-      if ((execpid = fork()) == 0) {
-        char *bin;
-        bin = strtok(&target[1], "."); // target[0] は '/' なので target[1] から
-        printf("target -> %s, bin -> %s, query_line -> %s\n", &target[1], bin, query_line);
-        close(ctop[0]);
-        dup2(ctop[1], STDOUT_FILENO);
-        execlp("./crun.sh", "./crun.sh", bin, query_line, NULL); 
-        perror("execlp");
+      } else if (strstr(target, ".c") != NULL){
+        printf("c\n");
+        int execpid;
+        int ctop[2];
+        pipe(ctop);
+        if ((execpid = fork()) == 0) {
+          char *bin;
+          bin = strtok(&target[1], "."); // target[0] は '/' なので target[1] から
+          printf("target -> %s, bin -> %s, query_line -> %s\n", &target[1], bin, query_line);
+          close(ctop[0]);
+          dup2(ctop[1], STDOUT_FILENO);
+          execlp("./crun.sh", "./crun.sh", bin, query_line, NULL); 
+          perror("execlp");
+          close(ctop[1]);
+          close(clientfd);
+          exit(1);
+        }
+        // 結果を受け取る
         close(ctop[1]);
-        close(clientfd);
-        exit(1);
+        if (read(ctop[0], file_str, sizeof(file_str)) < 0) {
+          perror("read");
+          status = 500;
+        }
+        close(ctop[0]);
+        status = 200;
+        file_size = strlen(file_str);
       }
-      // 結果を受け取る
-      close(ctop[1]);
-      if (read(ctop[0], file_str, sizeof(file_str)) < 0) {
-        perror("read");
-        status = 500;
-      }
-      close(ctop[0]);
-      status = 200;
-      file_size = strlen(file_str);
     }
-  } else {
+  } else { // GET と POST 以外
     status = 404;
   }
-
-  // make header field
-  snprintf(header_field, sizeof(header_field), "%s%u\r\n", header_content, file_size);    
 
   // make response
   switch (status) {
     case 200:
+      snprintf(header_field, sizeof(header_field), "%s%u\r\n", header_content, file_size); // make header field
       snprintf(res_mes, sizeof(res_mes), "HTTP/1.1 %d OK\r\n%s\r\n%s", status, header_field, file_str); 
       break;
     case 500:
+      snprintf(file_path, sizeof(file_path), "%s/500.html", static_path);
+      if ((res_filefp = fopen(file_path, "r")) == NULL) { // 流石にここでエラーが起きるとWebサーバとしてまずいので止める
+        perror("500 fopen");
+        exit(1);
+      }
+      if ((fread(file_str, sizeof(unsigned char), sizeof(file_str), res_filefp)) < 0) { // 同様
+        perror("500 fread");
+        exit(1);
+      }
+      snprintf(header_field, sizeof(header_field), "%s%lu\r\n", header_content, strlen(file_str)); // make header field
+      snprintf(res_mes, sizeof(res_mes), "HTTP/1.1 %d Internal Server Error\r\n%s\r\n%s", status, header_field, file_str); 
+      break;
     case 404:
     default:
-      snprintf(res_mes, sizeof(res_mes), "HTTP/1.1 %d Not Found\r\n%s\r\n", status, header_field); 
+      snprintf(file_path, sizeof(file_path), "%s/404.html", static_path);
+      if ((res_filefp = fopen(file_path, "r")) == NULL) { // 流石にここでエラーが起きるとWebサーバとしてまずいので止める
+        perror("404 fopen");
+        exit(1);
+      }
+      if ((fread(file_str, sizeof(unsigned char), sizeof(file_str), res_filefp)) < 0) { // 同様
+        perror("404 fread");
+        exit(1);
+      }
+      snprintf(header_field, sizeof(header_field), "%s%lu\r\n", header_content, strlen(file_str)); // make header field
+      snprintf(res_mes, sizeof(res_mes), "HTTP/1.1 %d Not Found\r\n%s\r\n%s", status, header_field, file_str); 
   }
   res_size = strlen(res_mes);
 
