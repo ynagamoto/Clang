@@ -6,6 +6,7 @@
 #include<netinet/in.h>
 #include<sys/select.h>
 #include<sys/stat.h>
+#include<sys/wait.h>
 
 #define KILO      1024
 #define MAXCONN   10
@@ -32,7 +33,7 @@ char header_content[] = "Content-Length: ";
 void httpServer(int clientfd);
 
 int main(int argc, char *argv[]) {
-  int listenfd, connfd, nbytes, client, port;
+  int listenfd, connfd, nbytes, client, port, pid, status;
   struct sockaddr_in servaddr;
   char buf[256];
   
@@ -43,6 +44,16 @@ int main(int argc, char *argv[]) {
   } else {
     port = atoi(argv[1]);
   }
+
+  // ./code 以下の .c ファイルをコンパイルする
+  printf("compiling c source ... ");
+  if ((pid = fork()) == 0) {
+    execlp("./gcc_all.sh", "./gcc_all.sh", NULL);
+    perror("execlp");
+    exit(1);
+  }
+  wait(&status);
+  printf("done\n");
 
   // socket
   if ((listenfd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
@@ -119,17 +130,19 @@ int main(int argc, char *argv[]) {
 }
 
 void httpServer(int clientfd) {
-  int  status, req_size, res_size, file_size, flag = 1;
-  char req_mes[SIZE], res_mes[SIZE*2], req_lines[KILO][2*KILO], first_line[KILO], method[KILO/4], target[KILO/4], *temp_target, *line;
+  int  status, req_size, res_size, file_size = 0, flag = 1;
+  char req_mes[SIZE], res_mes[SIZE*2], req_lines[KILO][2*KILO], first_line[KILO];
+  char method[KILO/4], target[KILO/4], *temp_target, *line, query_line[KILO];
   char file_path[SIZE], file_str[SIZE/2], header_field[SIZE];
-  FILE *res_filefp;
   int  req_line_num = 0, query_num = 0; 
+  FILE *res_filefp;
   struct header headers[KILO];
   struct query  querys[KILO];
 
   if (read(clientfd, req_mes, sizeof(req_mes)) < 0) {
     perror("read");
-    close(clientfd);
+    // close(clientfd);
+    flag = 0;
   }
 
   printf("%s\n", req_mes);
@@ -159,9 +172,10 @@ void httpServer(int clientfd) {
   if (strchr(temp_target, (int)'?') != NULL) {
     strcpy(target, strtok(temp_target, "?"));
     // split text with & -> store get query
-    char rem[KILO];
     char temp_query[KILO][KILO];
+    char rem[KILO];
     strcpy(rem, strtok(NULL, "\0"));
+    strcpy(query_line, rem);
     for (char *temp = strtok(rem, "&"); temp!= NULL; temp = strtok(NULL, "&")) {
       strcpy(temp_query[query_num], temp);
       query_num++;
@@ -195,38 +209,68 @@ void httpServer(int clientfd) {
       key = strtok(req_lines[i], "=");
       strcpy(querys[query_num].key, key);
       strcpy(querys[query_num].value, strtok(NULL, "\0"));
+      snprintf(query_line, sizeof(query_line), "%s&%s", query_line, req_lines[i]);
       query_num++;
     }
   }
+  printf("query_line -> %s\n", query_line);
 
+  // .html のときは ./static 以下の html を，.c のときはプログラムの出力結果を返す
   if (flag && (strcmp(method, "GET") == 0 || strcmp(method, "POST") == 0)) {
     if (strcmp(target, "/") == 0) {
       strcpy(target, "/index.html");
     }
-
-    snprintf(file_path, sizeof(file_path), "%s%s", static_path, target);
-    printf("file_path: %s\n", file_path);
-    struct stat sb;
-    if (stat(file_path, &sb) == -1) {
-      status = 404;
-    } else {
-      if ((file_size = sb.st_size) > 0) {
-        if ((res_filefp = fopen(file_path, "r")) == NULL) {
-          perror("fopen");
-          close(clientfd);
-          exit(1);
-        }
-        if (fread(file_str, sizeof(unsigned char), sizeof(file_str)/sizeof(unsigned char), res_filefp) < 0) {
-          perror("fread");
-          close(clientfd);
-          fclose(res_filefp);
-          exit(1);
-        }
-        fclose(res_filefp);
-        status = 200;
-      } else {
+    
+    if (strstr(target, ".html") != NULL) {
+      snprintf(file_path, sizeof(file_path), "%s%s", static_path, target);
+      // printf("file_path: %s\n", file_path);
+      struct stat sb;
+      if (stat(file_path, &sb) == -1) {
         status = 404;
+      } else {
+        if ((file_size = sb.st_size) > 0) {
+          if ((res_filefp = fopen(file_path, "r")) == NULL) {
+            perror("fopen");
+            close(clientfd);
+            exit(1);
+          }
+          if (fread(file_str, sizeof(unsigned char), sizeof(file_str)/sizeof(unsigned char), res_filefp) < 0) {
+            perror("fread");
+            close(clientfd);
+            fclose(res_filefp);
+            exit(1);
+          }
+          fclose(res_filefp);
+          status = 200;
+        } else {
+          status = 404;
+        }
       }
+    } else if (strstr(target, ".c") != NULL){
+      int execpid;
+      int ctop[2];
+      pipe(ctop);
+      if ((execpid = fork()) == 0) {
+        char *bin;
+        bin = strtok(&target[1], "."); // target[0] は '/' なので target[1] から
+        printf("target -> %s, bin -> %s, query_line -> %s\n", &target[1], bin, query_line);
+        close(ctop[0]);
+        dup2(ctop[1], STDOUT_FILENO);
+        execlp("./crun.sh", "./crun.sh", bin, query_line, NULL); 
+        perror("execlp");
+        close(ctop[1]);
+        close(clientfd);
+        exit(1);
+      }
+      // 結果を受け取る
+      close(ctop[1]);
+      if (read(ctop[0], file_str, sizeof(file_str)) < 0) {
+        perror("read");
+        status = 500;
+      }
+      close(ctop[0]);
+      status = 200;
+      file_size = strlen(file_str);
     }
   } else {
     status = 404;
@@ -240,12 +284,17 @@ void httpServer(int clientfd) {
     case 200:
       snprintf(res_mes, sizeof(res_mes), "HTTP/1.1 %d OK\r\n%s\r\n%s", status, header_field, file_str); 
       break;
+    case 500:
     case 404:
     default:
       snprintf(res_mes, sizeof(res_mes), "HTTP/1.1 %d Not Found\r\n%s\r\n", status, header_field); 
   }
   res_size = strlen(res_mes);
 
+  /* for (int i = 0; i < query_num; i++) {
+    printf("key -> %s, value -> %s\n", querys[i].key, querys[i].value);
+  } */
+  
   // send response
   printf("%s\n", res_mes);
   if (write(clientfd, res_mes, sizeof(res_mes)) < 0) {
