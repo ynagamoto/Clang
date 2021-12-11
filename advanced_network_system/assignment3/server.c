@@ -46,14 +46,14 @@ int main(int argc, char *argv[]) {
   }
 
   // ./code 以下の .c ファイルをコンパイルする
-  printf("compiling c source ... ");
+  printf("Compiling Clang source ... ");
   if ((pid = fork()) == 0) {
     execlp("./gcc_all.sh", "./gcc_all.sh", NULL);
     perror("execlp");
     exit(1);
   }
   wait(&status);
-  printf("done\n");
+  printf("Done!\n");
 
   // socket
   if ((listenfd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
@@ -260,7 +260,7 @@ void httpServer(int clientfd) {
           printf("target -> %s, bin -> %s, query_line -> %s\n", &target[1], bin, query_line);
           close(ctop[0]);
           dup2(ctop[1], STDOUT_FILENO);
-          execlp("./crun.sh", "./crun.sh", bin, query_line, NULL); 
+          execlp("./crun.sh", "./crun.sh", bin, query_num, query_line, NULL); 
           perror("execlp");
           close(ctop[1]);
           close(clientfd);
