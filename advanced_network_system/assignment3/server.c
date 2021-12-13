@@ -148,7 +148,7 @@ void httpServer(int clientfd) {
     flag = 0;
   }
 
-  printf("%s\n", req_mes);
+  printf("%s\n###end req_mes### \n\n", req_mes);
 
   // check method and target
   line = strtok(req_mes, "\n");
@@ -201,6 +201,7 @@ void httpServer(int clientfd) {
   // printf("target -> %s\n", target);
 
   // analyze post query
+  int inter_c = 0; 
   for (int i = 0; i < req_line_num; i++) {
     char *key;
     if (strchr(req_lines[i], (int)':') != NULL) {
@@ -209,15 +210,23 @@ void httpServer(int clientfd) {
       strcpy(headers[i].key, key);
       strcpy(headers[i].value, strtok(NULL, "\0"));
     } else if (strchr(req_lines[i], (int)'=') != NULL) { // analyze post query
-      key = strtok(req_lines[i], "=");
-      strcpy(querys[query_num].key, key);
-      strcpy(querys[query_num].value, strtok(NULL, "\0"));
-      snprintf(query_line, sizeof(query_line), "%s&%s", query_line, req_lines[i]);
+      //printf("%s\n", req_lines[i]);
+      if (inter_c == 0) {  //現状postは1行だが一応分岐
+        snprintf(query_line, sizeof(query_line), "%s", req_lines[i]);
+        inter_c++;
+      } else {
+        snprintf(query_line, sizeof(query_line), "%s&%s", query_line, req_lines[i]);
+      }
+      //printf("%s\n", query_line);
+      //printf("%s %d\n", req_lines[i], count);
+      //key = strtok(req_lines[i], "=");
+      //strcpy(querys[query_num].key, key);
+      //strcpy(querys[query_num].value, strtok(NULL, "\0"));
       query_num++;
     }
   }
   printf("query_line -> %s\n", query_line);
-
+  printf("target -> %s\n", target);
   // .html のときは ./static 以下の html を，.c のときはプログラムの出力結果を返す
   if (flag && (strcmp(method, "GET") == 0 || strcmp(method, "POST") == 0)) {
     if (strcmp(target, "/") == 0) {
@@ -229,7 +238,37 @@ void httpServer(int clientfd) {
     if (stat(file_path, &sb) == -1) { // 指定されたファイルが存在しなかった
       status = 404;
     } else {
-      if (strstr(target, ".html") != NULL) {
+      //if (strstr(target, ".c.html") != NULL){
+      if (strstr(target, ".c") != NULL) {
+        printf("c\n");
+        int execpid;
+        int ctop[2];
+        pipe(ctop);
+        if ((execpid = fork()) == 0) {
+          char *bin;
+          bin = strtok(&target[1], "."); // target[0] は '/' なので target[1] から
+          printf("target -> %s, bin -> %s, query_line -> %s\n", &target[1], bin, query_line);
+          close(ctop[0]);
+          dup2(ctop[1], STDOUT_FILENO);
+	        char query_num_s[3];
+	        sprintf(query_num_s, "%d", query_num);
+          execlp("./crun.sh", "./crun.sh", bin, query_num_s, query_line, NULL); 
+	        //execlp("./crun.sh", "./crun.sh", "hoge", "aaa", NULL);
+          perror("execlp");
+          close(ctop[1]);
+          close(clientfd);
+          exit(1);
+        }
+        // 結果を受け取る
+        close(ctop[1]);
+        if (read(ctop[0], file_str, sizeof(file_str)) < 0) {
+          perror("read");
+          status = 500;
+        }
+        close(ctop[0]);
+        status = 200;
+        file_size = strlen(file_str);
+      } else if (strstr(target, ".html") != NULL) {
         printf("html\n");
         snprintf(file_path, sizeof(file_path), "%s%s", static_path, target);
         // printf("file_path: %s\n", file_path);
@@ -249,32 +288,6 @@ void httpServer(int clientfd) {
         } else {
           status = 404;
         }
-      } else if (strstr(target, ".c") != NULL){
-        printf("c\n");
-        int execpid;
-        int ctop[2];
-        pipe(ctop);
-        if ((execpid = fork()) == 0) {
-          char *bin;
-          bin = strtok(&target[1], "."); // target[0] は '/' なので target[1] から
-          printf("target -> %s, bin -> %s, query_line -> %s\n", &target[1], bin, query_line);
-          close(ctop[0]);
-          dup2(ctop[1], STDOUT_FILENO);
-          execlp("./crun.sh", "./crun.sh", bin, query_num, query_line, NULL); 
-          perror("execlp");
-          close(ctop[1]);
-          close(clientfd);
-          exit(1);
-        }
-        // 結果を受け取る
-        close(ctop[1]);
-        if (read(ctop[0], file_str, sizeof(file_str)) < 0) {
-          perror("read");
-          status = 500;
-        }
-        close(ctop[0]);
-        status = 200;
-        file_size = strlen(file_str);
       }
     }
   } else { // GET と POST 以外
@@ -327,4 +340,5 @@ void httpServer(int clientfd) {
     close(clientfd);
     exit(1);
   }
+  printf("OK\n");
 }
