@@ -134,7 +134,7 @@ int main(int argc, char *argv[]) {
 
 void httpServer(int clientfd) {
   int  status, req_size, res_size, file_size = 0, flag = 1;
-  char req_mes[SIZE], res_mes[SIZE*2], req_lines[KILO][2*KILO], first_line[KILO];
+  char req_mes[SIZE], res_mes[SIZE*2], req_lines[KILO][2*KILO], first_line[KILO], first_line_cp[KILO];
   char method[KILO/4], target[KILO/4], *temp_target, *line, query_line[KILO];
   char file_path[SIZE], file_str[SIZE/2], header_field[SIZE];
   int  req_line_num = 0, query_num = 0; 
@@ -153,6 +153,7 @@ void httpServer(int clientfd) {
   // check method and target
   line = strtok(req_mes, "\n");
   strcpy(first_line, line);
+  strcpy(first_line_cp, line);
 
   // split request to line
   for (req_line_num = 0, line = strtok(NULL, "\n"); line != NULL; line = strtok(NULL, "\n")) {
@@ -172,22 +173,34 @@ void httpServer(int clientfd) {
 
   // split target and analyze get query
   temp_target = strtok(NULL, " ");
+  printf("temp_target -> %s\n", temp_target);
   if (strchr(temp_target, (int)'?') != NULL) {
     strcpy(target, strtok(temp_target, "?"));
-    // split text with & -> store get query
-    char temp_query[KILO][KILO];
-    char rem[KILO];
-    strcpy(rem, strtok(NULL, "\0"));
-    strcpy(query_line, rem);
-    for (char *temp = strtok(rem, "&"); temp!= NULL; temp = strtok(NULL, "&")) {
-      strcpy(temp_query[query_num], temp);
-      query_num++;
-    }
+    printf("target -> %s\n", target);
 
-    for (int i = 0; i < query_num; i++) {
-      char *temp = strtok(temp_query[i], "=");
-      strcpy(querys[i].key, temp); 
-      strcpy(querys[i].value, strtok(NULL, "\0")); 
+    // split text with & -> store get query
+    if (strtok(NULL, "\0") != NULL) {
+      char rem[KILO], temp[KILO], *temp_method = strtok(first_line_cp, " "); 
+      printf("first_line -> %s\n", first_line);
+      printf("temp_method -> %s\n", temp_method);
+      strcpy(temp, strtok(NULL, " "));
+      printf("temp -> %s\n", temp);
+      char *tmp_target = strtok(temp, "?");
+      printf("tmp_target -> %s\n", tmp_target);
+      strcpy(rem, strtok(NULL, "\0"));
+      printf("rem -> %s\n", rem);
+      char temp_query[KILO][KILO];
+      strcpy(query_line, rem);
+      for (char *temp = strtok(rem, "&"); temp!= NULL; temp = strtok(NULL, "&")) {
+        // strcpy(temp_query[query_num], temp);
+        query_num++;
+      }
+
+      /* for (int i = 0; i < query_num; i++) {
+        char *temp = strtok(temp_query[i], "=");
+        strcpy(querys[i].key, temp); 
+        strcpy(querys[i].value, strtok(NULL, "\0")); 
+      } */
     }
   } else {
     strcpy(target, temp_target); 
@@ -245,13 +258,14 @@ void httpServer(int clientfd) {
         int ctop[2];
         pipe(ctop);
         if ((execpid = fork()) == 0) {
+          printf("Start Child Process\n");
           char *bin;
           bin = strtok(&target[1], "."); // target[0] は '/' なので target[1] から
-          printf("target -> %s, bin -> %s, query_line -> %s\n", &target[1], bin, query_line);
-          close(ctop[0]);
-          dup2(ctop[1], STDOUT_FILENO);
 	        char query_num_s[3];
 	        sprintf(query_num_s, "%d", query_num);
+          printf("bin -> %s, query_num_s -> %s, query_line -> %s\n", bin, query_num_s, query_line);
+          close(ctop[0]);
+          dup2(ctop[1], STDOUT_FILENO);
           execlp("./crun.sh", "./crun.sh", bin, query_num_s, query_line, NULL); 
 	        //execlp("./crun.sh", "./crun.sh", "hoge", "aaa", NULL);
           perror("execlp");

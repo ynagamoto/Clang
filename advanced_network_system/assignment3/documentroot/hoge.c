@@ -1,7 +1,7 @@
 #include<stdio.h>
 #include<stdlib.h>
 
-char html[] = "<!DOCTYPE>\n\
+char html[] = "<!DOCTYPE html>\n\
 <html>\n\
   <head>\n\
     <meta charset=\"utf-8\">\n\
